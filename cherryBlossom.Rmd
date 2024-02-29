@@ -1,0 +1,366 @@
+```{r}
+library(tidyverse)
+library(forecast)
+library(vars)
+library(dplyr)
+library(caret)
+```
+
+```{r import data}
+#washington dc 
+dc_temp<- read.csv("dc_noaa.csv")
+dc_temp$DATE<- as.Date(dc_temp$DATE, "%Y-%m-%d")
+
+dc_bloom<- read_csv("washingtondc.csv")
+dc_bloom$bloom_date<- as.Date(dc_bloom$bloom_date, "%Y-%m-%d")
+
+#kyoto
+kyoto_temp<- read.csv("kyoto_noaa.csv")
+kyoto_temp$DATE<- as.Date(kyoto_temp$DATE, "%Y-%m-%d")
+
+kyoto_bloom<- read.csv("kyoto.csv")
+kyoto_bloom$bloom_date<- as.Date(kyoto_bloom$bloom_date, "%Y-%m-%d")
+
+#liestal
+switz_temp<- read.csv("switz_noaa.csv")
+switz_temp$DATE<- as.Date(switz_temp$DATE, "%Y-%m-%d")
+
+liestal_bloom<- read.csv("liestal.csv")
+liestal_bloom$bloom_date<- as.Date(liestal_bloom$bloom_date, "%Y-%m-%d")
+
+```
+
+```{r filter date range}
+
+#washington dc 
+dc_bloom<- dc_bloom[dc_bloom$bloom_date >= "1999-04-05" & dc_bloom$bloom_date <= "2023-03-23",]
+
+dc_temp_all <- dc_temp %>%
+  mutate(month = lubridate::month(DATE)) %>%
+  filter(month %in% c(1:4),
+         year(DATE) >= 1999 & year(DATE) <= 2023)
+dc_temp_all <- dc_temp_all[, -which(names(dc_temp_all) == "month")]
+
+#Only 2024 obs 
+dc_temp2024<- dc_temp[dc_temp$DATE >= "2024-01-01" & dc_temp$DATE <= "2024-02-23",]
+
+#kyoto
+kyoto_bloom<- kyoto_bloom[kyoto_bloom$bloom_date >= "1999-04-04" & kyoto_bloom$bloom_date <= "2023-03-25",]
+
+kyoto_temp_all <- kyoto_temp %>%
+  mutate(month = lubridate::month(DATE)) %>%
+  filter(month %in% c(1:4),
+         year(DATE) >= 1999 & year(DATE) <= 2023)
+kyoto_temp_all <- kyoto_temp_all[, -which(names(kyoto_temp_all) == "month")]
+
+kyoto_temp2024<- kyoto_temp[kyoto_temp$DATE >= "2024-01-01" & kyoto_temp$DATE <= "2024-02-23",]
+
+#liestal 
+liestal_bloom<- liestal_bloom[liestal_bloom$bloom_date >= "1999-04-04" & liestal_bloom$bloom_date <= "2023-03-29",]
+
+switz_temp_all <- switz_temp %>%
+  mutate(month = lubridate::month(DATE)) %>%
+  filter(month %in% c(1:4),
+         year(DATE) >= 1999 & year(DATE) <= 2023)
+switz_temp_all <- switz_temp_all[, -which(names(switz_temp_all) == "month")]
+
+switz_temp2024<- switz_temp[switz_temp$DATE >= "2024-01-01" & switz_temp$DATE <= "2024-02-23",]
+
+
+```
+
+```{r gdd calc. }
+#washington dc 
+base_temp <- 50
+gdd_calc <- dc_temp_all %>%
+  mutate(avg_temp = (TMAX+TMIN) /2,
+    gdd = pmax(avg_temp - base_temp,0))  
+
+# Group the filtered data by year
+  gdd_year_dc <- gdd_calc %>%
+  group_by(year = substr(DATE, 1, 4)) %>% 
+  summarise(cumulative_gdd = sum(gdd),
+    low_temp = min(TMIN),   
+    high_temp = max(TMAX) )
+  
+#convert year to numeric 
+gdd_year_dc$year<- as.numeric(gdd_year_dc$year)
+
+#gdd calc for 2024 obs 
+gdd_calc2024<- dc_temp2024 %>% 
+  mutate(avg_temp = (TMAX+TMIN) /2,
+    gdd = pmax(avg_temp - base_temp,0)) 
+gdd_year_dc2024 <- gdd_calc2024 %>%
+  group_by(year = substr(DATE, 1, 4)) %>% 
+  summarise(cumulative_gdd = sum(gdd), 
+    low_temp = min(TMIN),   
+    high_temp = max(TMAX))
+gdd_year_dc2024$year<- as.numeric(gdd_year_dc2024$year)
+
+#kyoto 
+gdd_calc_kyoto <- kyoto_temp_all %>%
+  mutate(gdd = pmax(TAVG - base_temp,0))  
+
+  gdd_year_kyoto <- gdd_calc_kyoto %>%
+  group_by(year = substr(DATE, 1, 4)) %>% 
+  summarise(cumulative_gdd = sum(gdd),
+    low_temp = min(TMIN, na.rm = TRUE),   
+    high_temp = max(TMAX, na.rm = TRUE))
+  
+gdd_year_kyoto$year<- as.numeric(gdd_year_kyoto$year)
+
+gdd_calc2024_kyoto<- kyoto_temp2024 %>% 
+  mutate(gdd = pmax(TAVG- base_temp,0)) 
+gdd_year_kyoto2024 <- gdd_calc2024_kyoto %>%
+  group_by(year = substr(DATE, 1, 4)) %>% 
+  summarise(cumulative_gdd = sum(gdd), 
+    low_temp = min(TMIN, na.rm = TRUE),   
+    high_temp = max(TMAX, na.rm = TRUE))
+gdd_year_kyoto2024$year<- as.numeric(gdd_year_kyoto2024$year)
+
+#liestal
+gdd_calc_liestal <- switz_temp_all %>%
+  filter(!is.na(TMAX) & !is.na(TMIN)) %>%
+  mutate(avg_temp = (TMAX+TMIN) /2,
+    gdd = pmax(avg_temp - base_temp,0))  
+
+  gdd_year_liestal <- gdd_calc_liestal %>%
+  group_by(year = substr(DATE, 1, 4)) %>% 
+  summarise(cumulative_gdd = sum(gdd),
+    low_temp = min(TMIN, na.rm = TRUE),   
+    high_temp = max(TMAX, na.rm = TRUE))
+  
+gdd_year_liestal$year<- as.numeric(gdd_year_liestal$year)
+
+gdd_calc2024_liestal<- switz_temp2024 %>% 
+  filter(!is.na(TMAX) & !is.na(TMIN)) %>%
+  mutate(avg_temp = (TMAX+TMIN) /2,
+    gdd = pmax(avg_temp - base_temp,0)) 
+gdd_year_liestal2024 <- gdd_calc2024_liestal %>%
+  group_by(year = substr(DATE, 1, 4)) %>% 
+  summarise(cumulative_gdd = sum(gdd), 
+    low_temp = min(TMIN, na.rm = TRUE),   
+    high_temp = max(TMAX, na.rm = TRUE))
+gdd_year_liestal2024$year<- as.numeric(gdd_year_liestal2024$year)
+```
+
+```{r merge}
+dc_merge<- right_join(dc_bloom,gdd_year_dc, by = "year")
+kyoto_merge<- right_join(kyoto_bloom, gdd_year_kyoto, by = "year")
+liestal_merge<- right_join(liestal_bloom, gdd_year_liestal, by = "year")
+
+```
+
+```{r predict}
+#washington dc 
+library(caTools)
+library(randomForest)
+set.seed(123)  
+train_indices <- sample(1:nrow(dc_merge), 0.8 * nrow(dc_merge))
+train_data <- dc_merge[train_indices, ]
+test_data <- dc_merge[-train_indices, ]
+
+rf_dc<- randomForest(x = train_data[,8:10],
+                     y = train_data$bloom_doy,
+                     ntree = 500, random_state = 0)
+pred_dc<- predict(rf_dc, newdata = test_data[,8:10])
+mean((test_data$bloom_doy - pred_dc)**2)
+
+
+pred_dc2024<- predict(rf_dc, newdata = gdd_year_dc2024)
+pred_dc2024
+
+#kyoto
+set.seed(892)  
+train_indices_kyoto <- sample(1:nrow(kyoto_merge), 0.8 * nrow(kyoto_merge))
+train_kyoto <- kyoto_merge[train_indices_kyoto, ]
+test_kyoto <- kyoto_merge[-train_indices_kyoto, ]
+
+rf_kyoto<- randomForest(x = train_kyoto[,8:10],
+                     y = train_kyoto$bloom_doy,
+                     ntree = 500, random_state = 0)
+pred_kyoto<- predict(rf_kyoto, newdata = test_kyoto[,8:10])
+mean((test_kyoto$bloom_doy - pred_kyoto)**2)
+
+
+pred_kyoto2024<- predict(rf_kyoto, newdata = gdd_year_kyoto2024)
+pred_kyoto2024
+
+#liestal
+set.seed(256)  
+train_indices_liestal <- sample(1:nrow(liestal_merge), 0.8 * nrow(liestal_merge))
+train_liestal <- liestal_merge[train_indices_liestal, ]
+test_liestal <- liestal_merge[-train_indices_liestal, ]
+
+rf_liestal<- randomForest(x = train_liestal[,8:10],
+                     y = train_liestal$bloom_doy,
+                     ntree = 500, random_state = 0)
+pred_liestal<- predict(rf_liestal, newdata = test_liestal[,8:10])
+mean((test_liestal$bloom_doy - pred_liestal)**2)
+
+
+pred_liestal2024<- predict(rf_liestal, newdata = gdd_year_liestal2024)
+pred_liestal2024
+
+
+```
+
+```{r cross validation liestal}
+set.seed(123)
+repeated_cv <- trainControl(method = "repeatedcv", number = 5, repeats = 3)
+
+forest<- train(bloom_doy~cumulative_gdd+low_temp+high_temp, 
+               data = train_liestal, 
+               method = "rf", 
+               trControl = repeated_cv)
+best_rf<- forest$bestTune
+
+final_rf <- randomForest(bloom_doy ~ cumulative_gdd+low_temp+high_temp, 
+                                data = train_liestal, 
+                                mtry = best_rf$mtry, 
+                                ntree = 500)
+pred <- predict(final_rf, newdata = test_liestal)
+mse <- mean((test_liestal$bloom_doy - pred)**2)
+
+pred2024 <- predict(final_rf, newdata = gdd_year_liestal2024)
+pred2024
+forest
+```
+
+```{r vancouver predictions}
+vancouver_temp<- read.csv("vancouver_noaa.csv")
+vancouver_temp$DATE<- as.Date(vancouver_temp$DATE, "%Y-%m-%d")
+
+vancouver_bloom<- read.csv("vancouver.csv")
+vancouver_bloom$bloom_date<- as.Date(vancouver_bloom$bloom_date, "%Y-%m-%d")
+
+#filtering date range 
+
+vancouver_temp_all <- vancouver_temp %>%
+  mutate(month = lubridate::month(DATE)) %>%
+  filter(month %in% c(1:4),
+         year(DATE) >= 1999 & year(DATE) <= 2023)
+vancouver_temp_all <- vancouver_temp_all[, -which(names(vancouver_temp_all) == "month")]
+
+#Only 2024 obs 
+vancouver_temp2024<- vancouver_temp[vancouver_temp$DATE >= "2024-01-01" & vancouver_temp$DATE <= "2024-02-23",]
+
+#merge different locations bloom_doy
+avg_data<- bind_rows(dc_bloom,liestal_bloom,kyoto_bloom) %>% 
+  group_by(year) %>% 
+  filter(year >= 1999 & year <=2021) %>% 
+  summarise(avg_bloom_doy = mean(bloom_doy))
+avg_data$avg_bloom_doy<- round(avg_data$avg_bloom_doy, digits = 0)
+
+merged_data <- merge(avg_data,vancouver_bloom, by = "year", all.x = TRUE, all.y = TRUE)
+
+merged_data$bloom_doy_combined <- ifelse(is.na(merged_data$avg_bloom_doy), 
+                                         merged_data$bloom_doy, 
+                                         merged_data$avg_bloom_doy)
+merged_data<- merged_data[c(1,9)]
+
+#calc. gdd, temps
+gdd_calc_vancouver <- vancouver_temp_all %>%
+  filter(!is.na(TAVG)) %>% 
+  mutate(gdd = pmax(TAVG - 45,0))  
+
+  gdd_year_vancouver <- gdd_calc_vancouver %>%
+  group_by(year = substr(DATE, 1, 4)) %>% 
+  summarise(cumulative_gdd = sum(gdd),
+    low_temp = min(TMIN, na.rm = TRUE),   
+    high_temp = max(TMAX, na.rm = TRUE))
+  
+gdd_year_vancouver$year<- as.numeric(gdd_year_vancouver$year)
+
+gdd_calc2024_vancouver<- vancouver_temp2024 %>% 
+  filter(!is.na(TAVG)) %>% 
+  mutate(gdd = pmax(TAVG- 45,0)) 
+gdd_year_vancouver2024 <- gdd_calc2024_vancouver %>%
+  group_by(year = substr(DATE, 1, 4)) %>% 
+  summarise(cumulative_gdd = sum(gdd), 
+    low_temp = min(TMIN, na.rm = TRUE),   
+    high_temp = max(TMAX, na.rm = TRUE))
+gdd_year_vancouver2024$year<- as.numeric(gdd_year_vancouver2024$year)
+
+#merge
+vancouver_merge<- right_join(merged_data, gdd_year_vancouver, by = "year")
+
+#prediction
+set.seed(289)  
+train_indices_vancouver <- sample(1:nrow(vancouver_merge), 0.8 * nrow(vancouver_merge))
+train_vancouver <- vancouver_merge[train_indices_vancouver, ]
+test_vancouver <- vancouver_merge[-train_indices_vancouver, ]
+
+rf_vancouver<- randomForest(x = train_vancouver[,3:5],
+                     y = train_vancouver$bloom_doy_combined,
+                     ntree = 500, random_state = 0)
+pred_vancouver<- predict(rf_vancouver, newdata = test_vancouver[,3:5])
+mean((test_vancouver$bloom_doy - pred_vancouver)**2)
+
+
+pred_vancouver2024<- predict(rf_vancouver, newdata = gdd_year_vancouver2024)
+pred_vancouver2024
+
+```
+
+```{r ny predictions}
+ny_temp<- read.csv("ny_noaa.csv")
+ny_temp$DATE<- as.Date(ny_temp$DATE, "%Y-%m-%d")
+
+#date range 
+
+ny_temp_all <- ny_temp %>%
+  mutate(month = lubridate::month(DATE)) %>%
+  filter(month %in% c(1:4),
+         year(DATE) >= 1999 & year(DATE) <= 2023)
+ny_temp_all <- ny_temp_all[, -which(names(ny_temp_all) == "month")]
+
+ny_temp2024<- ny_temp[ny_temp$DATE >= "2024-01-01" & ny_temp$DATE <= "2024-02-23",]
+
+#calculations 
+gdd_calc_ny <- ny_temp_all %>%
+  mutate(avg_temp = (TMAX+TMIN) /2,
+    gdd = pmax(avg_temp - 45,0))  
+
+  gdd_year_ny <- gdd_calc_ny %>%
+  group_by(year = substr(DATE, 1, 4)) %>% 
+  summarise(cumulative_gdd = sum(gdd),
+    low_temp = min(TMIN, na.rm = TRUE),   
+    high_temp = max(TMAX, na.rm = TRUE))
+  
+gdd_year_ny$year<- as.numeric(gdd_year_ny$year)
+
+gdd_calc2024_ny<- ny_temp2024 %>% 
+  mutate(avg_temp = (TMAX+TMIN) /2,
+    gdd = pmax(avg_temp- 45,0)) 
+gdd_year_ny2024 <- gdd_calc2024_ny %>%
+  group_by(year = substr(DATE, 1, 4)) %>% 
+  summarise(cumulative_gdd = sum(gdd), 
+    low_temp = min(TMIN, na.rm = TRUE),   
+    high_temp = max(TMAX, na.rm = TRUE))
+gdd_year_ny2024$year<- as.numeric(gdd_year_ny2024$year)
+
+#merge
+ny_merge<- right_join(dc_bloom,gdd_year_ny, by = "year")
+
+#predictions
+set.seed(423)  
+train_indices_ny <- sample(1:nrow(ny_merge), 0.8 * nrow(ny_merge))
+train_ny <- ny_merge[train_indices_ny, ]
+test_ny <- ny_merge[-train_indices_ny, ]
+
+rf_ny<- randomForest(x = train_ny[,8:10],
+                     y = train_ny$bloom_doy,
+                     ntree = 500, random_state = 0)
+pred_ny<- predict(rf_ny, newdata = test_ny[,8:10])
+mean((test_ny$bloom_doy - pred_ny)**2)
+
+
+pred_ny2024<- predict(rf_ny, newdata = gdd_year_ny2024)
+pred_ny2024
+```
+
+
+
+
+
